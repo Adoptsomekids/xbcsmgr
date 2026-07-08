@@ -15,9 +15,9 @@ namespace XboxCsMgr.Client
     public class AppBootstrapper : Bootstrapper<ShellViewModel>
     {
         public static XboxLiveConfig? XblConfig { get; internal set; }
-        private AuthenticateService? authenticateService;
-        private string? DeviceToken { get; set; }
-        private string? UserToken { get; set; }
+
+        // Expose the auth service so ShellViewModel can use it after login
+        internal static AuthenticateService? AuthService { get; private set; }
 
         protected override void ConfigureIoC(StyletIoC.IStyletIoCBuilder builder)
         {
@@ -25,63 +25,23 @@ namespace XboxCsMgr.Client
             builder.Bind<IDialogFactory>().ToAbstractFactory();
         }
 
-        protected override async void OnStart()
+        protected override void OnStart()
         {
-            authenticateService = new AuthenticateService(XblConfig);
+            // Create the AuthenticateService with null config — it handles null safely.
+            // Actual authentication happens in ShellViewModel.OnViewLoaded after
+            // the main window is fully started (so WindowManager is usable).
+            AuthService = new AuthenticateService(XblConfig!);
+
+            // Try to load any existing wincred tokens into a static cache for ShellViewModel
             LoadXblTokenCredentials();
-
-            // Try wincred tokens if we have both
-            if (!string.IsNullOrEmpty(UserToken) && !string.IsNullOrEmpty(DeviceToken))
-            {
-                try
-                {
-                    var result = await authenticateService.AuthorizeXsts(UserToken, DeviceToken);
-                    if (result != null)
-                    {
-                        Debug.WriteLine("Authorized via wincred!");
-                        XblConfig = new XboxLiveConfig(result.Token, result.DisplayClaims.XboxUserIdentity[0]);
-                        this.RootViewModel.OnAuthComplete();
-                        base.OnStart();
-                        return;
-                    }
-                }
-                catch (Exception ex) { Debug.WriteLine("Wincred XSTS failed: " + ex.Message); }
-            }
-
-            // No valid wincred tokens — open the WebView2 login dialog
-            var wm = this.Container.Get<IWindowManager>();
-            var loginVm = new LoginViewModel();
-            this.RootViewModel.LoginView = loginVm;
-            bool? loginResult = wm.ShowDialog(loginVm);
-
-            if (loginResult == true && !string.IsNullOrEmpty(loginVm.AccessToken))
-            {
-                try
-                {
-                    var deviceResponse = await authenticateService.AuthenticateDeviceToken(loginVm.AccessToken, "10.0.19041");
-                    var userResponse   = await authenticateService.AuthenticateUser(loginVm.AccessToken);
-                    DeviceToken = deviceResponse?.Token;
-                    UserToken   = userResponse?.Token;
-
-                    if (!string.IsNullOrEmpty(UserToken) && !string.IsNullOrEmpty(DeviceToken))
-                    {
-                        var xsts = await authenticateService.AuthorizeXsts(UserToken, DeviceToken);
-                        if (xsts != null)
-                        {
-                            XblConfig = new XboxLiveConfig(xsts.Token, xsts.DisplayClaims.XboxUserIdentity[0]);
-                            this.RootViewModel.OnAuthComplete();
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    System.Windows.MessageBox.Show("Auth failed: " + ex.Message, "Xbox Login Error",
-                        System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
-                }
-            }
 
             base.OnStart();
         }
+
+        private static string? _cachedDeviceToken;
+        private static string? _cachedUserToken;
+        public static string? CachedDeviceToken => _cachedDeviceToken;
+        public static string? CachedUserToken   => _cachedUserToken;
 
         private void LoadXblTokenCredentials()
         {
@@ -90,7 +50,6 @@ namespace XboxCsMgr.Client
             catch { return; }
             if (currentCredentials == null) return;
 
-            // Accept both "Xbl|" (old format) and "XblGrts|" (new Gaming Services format)
             var xblCredentials = currentCredentials
                 .Where(k => (k.Key.Contains("Xbl|") || k.Key.Contains("XblGrts|"))
                          && (k.Key.Contains("Dtoken") || k.Key.Contains("Utoken")))
@@ -104,11 +63,11 @@ namespace XboxCsMgr.Client
                     if (string.IsNullOrWhiteSpace(fixedJson) || !fixedJson.Contains("{")) continue;
                     XboxLiveToken? token = JsonConvert.DeserializeObject<XboxLiveToken>(fixedJson);
                     if (token?.TokenData == null || token.TokenData.NotAfter <= DateTime.UtcNow) continue;
-                    if (credential.Key.Contains("Dtoken") && DeviceToken == null)
-                        DeviceToken = token.TokenData.Token;
-                    else if (credential.Key.Contains("Utoken") && UserToken == null)
+                    if (credential.Key.Contains("Dtoken") && _cachedDeviceToken == null)
+                        _cachedDeviceToken = token.TokenData.Token;
+                    else if (credential.Key.Contains("Utoken") && _cachedUserToken == null)
                         if (token.TokenData.Token != "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-                            UserToken = token.TokenData.Token;
+                            _cachedUserToken = token.TokenData.Token;
                 }
                 catch { /* skip malformed entries */ }
             }
