@@ -85,28 +85,58 @@ namespace XboxCsMgr.Client.ViewModels
 
                 if (loginResult == true && !string.IsNullOrEmpty(loginVm.AccessToken))
                 {
-                    var deviceResponse = await authService.AuthenticateDeviceToken(loginVm.AccessToken, "10.0.19041");
-                    var userResponse   = await authService.AuthenticateUser(loginVm.AccessToken);
-                    var dTok = deviceResponse?.Token;
-                    var uTok = userResponse?.Token;
-
-                    if (!string.IsNullOrEmpty(uTok) && !string.IsNullOrEmpty(dTok))
-                    {
-                        var xsts = await authService.AuthorizeXsts(uTok, dTok);
-                        if (xsts != null)
-                        {
-                            AppBootstrapper.XblConfig = new XboxLiveConfig(
-                                xsts.Token, xsts.DisplayClaims.XboxUserIdentity[0]);
-                            OnAuthComplete();
-                            return;
-                        }
-                    }
+                    await AuthenticateWithToken(authService, loginVm.AccessToken);
                 }
             }
             catch (Exception ex)
             {
                 MessageBox.Show("Login failed: " + ex.Message, "Xbox Login Error",
                     MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// Try Device+User XSTS first; fall back to User-only XSTS if device token fails.
+        /// login.live.com passkey tokens are not compatible with RPS device auth (400).
+        /// </summary>
+        private async System.Threading.Tasks.Task AuthenticateWithToken(
+            XboxLive.Services.AuthenticateService authService, string accessToken)
+        {
+            // Step 1: always get the User token (works with any live.com token type)
+            var userResponse = await authService.AuthenticateUser(accessToken);
+            var uTok = userResponse?.Token;
+            if (string.IsNullOrEmpty(uTok))
+            {
+                MessageBox.Show("Could not obtain Xbox user token. Please try again.",
+                    "Xbox Login Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            // Step 2: try Device token (RPS t= prefix) — may fail with passkey tokens
+            string? dTok = null;
+            try
+            {
+                var deviceResponse = await authService.AuthenticateDeviceToken(accessToken, "10.0.19041");
+                dTok = deviceResponse?.Token;
+            }
+            catch
+            {
+                // Device token failed (passkey / modern auth) — continue without it.
+                // User-only XSTS still grants Connected Storage read/write access.
+            }
+
+            // Step 3: XSTS — with device token if available, user-only otherwise
+            var xsts = await authService.AuthorizeXsts(uTok, dTok);
+            if (xsts != null)
+            {
+                AppBootstrapper.XblConfig = new XboxLiveConfig(
+                    xsts.Token, xsts.DisplayClaims.XboxUserIdentity[0]);
+                OnAuthComplete();
+            }
+            else
+            {
+                MessageBox.Show("XSTS authorization failed. Please try again.",
+                    "Xbox Login Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
