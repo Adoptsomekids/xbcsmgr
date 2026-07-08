@@ -1,4 +1,5 @@
-﻿using Stylet;
+using Stylet;
+using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using XboxCsMgr.Client.ViewModels.Controls;
@@ -96,26 +97,57 @@ namespace XboxCsMgr.Client.ViewModels
         public async void Upload()
         {
             if (SelectedAtom == null)
-                return;
-
-            // Remove the file type, just need the UUID
-            string atom = SelectedAtom.AtomValue.Substring(0, SelectedAtom.AtomValue.IndexOf(','));
-            Microsoft.Win32.OpenFileDialog dlg = new Microsoft.Win32.OpenFileDialog();
-            dlg.FileName = SelectedAtom.AtomName;
-
-            bool? res = dlg.ShowDialog();
-            if (res == true)
             {
-                byte[] atomData = await File.ReadAllBytesAsync(dlg.FileName);
-                try
-                {
-                    var t = await _storageService.UploadBlobAsync(null, atomData, atom);
-                    var e = 1 + 1;
-                }
-                catch
-                {
+                System.Windows.MessageBox.Show(
+                    "Select an atom first: expand a save slot in the tree, then right-click the atom inside it.",
+                    "No atom selected", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                return;
+            }
 
+            // AtomValue format: "{UUID},binary" — strip ",binary" to get the raw UUID
+            string atomUuid = SelectedAtom.AtomValue.Contains(',')
+                ? SelectedAtom.AtomValue.Substring(0, SelectedAtom.AtomValue.IndexOf(','))
+                : SelectedAtom.AtomValue;
+
+            var dlg = new Microsoft.Win32.OpenFileDialog
+            {
+                Title  = $"Select replacement file for {SelectedAtom.AtomName}",
+                Filter = "Save files (*.bin)|*.bin|All files (*.*)|*.*"
+            };
+
+            if (dlg.ShowDialog() != true) return;
+
+            byte[] atomData = await File.ReadAllBytesAsync(dlg.FileName);
+
+            // Build a minimal metadata object — UploadBlobAsync checks if this is null and returns early if so
+            var blobMeta = new XboxCsMgr.XboxLive.Model.TitleStorage.TitleStorageBlobMetadata
+            {
+                FileName    = SelectedAtom.AtomName,
+                DisplayName = SelectedAtom.AtomName,
+                Size        = (ulong)atomData.Length,
+            };
+
+            try
+            {
+                var response = await _storageService.UploadBlobAsync(blobMeta, atomData, atomUuid);
+                if (response != null && (int)response.StatusCode < 300)
+                {
+                    System.Windows.MessageBox.Show(
+                        $"✔ Upload successful!\n\nAtom: {SelectedAtom.AtomName}\nUUID: {atomUuid}\nSize: {atomData.Length:N0} bytes\n\nLaunch Dead Island DE on Xbox and load your save.",
+                        "Upload Complete", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
                 }
+                else
+                {
+                    string status = response != null ? $"{(int)response.StatusCode} {response.ReasonPhrase}" : "null response";
+                    System.Windows.MessageBox.Show(
+                        $"Upload may have failed — server response: {status}\n\nIf this persists, try signing out and back in.",
+                        "Upload Warning", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show($"Upload failed:\n{ex.Message}",
+                    "Upload Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
             }
         }
     }
