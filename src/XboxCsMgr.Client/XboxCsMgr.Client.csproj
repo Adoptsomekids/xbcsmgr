@@ -1,13 +1,13 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net7.0-windows</TargetFramework>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <UseWPF>true</UseWPF>
     <ApplicationIcon>xboxcloudicon.ico</ApplicationIcon>
-    <BaseIntermediateOutputPath>..\..\build\XboxCsMgr.Client\</BaseIntermediateOutputPath>
-    <BaseOutputPath>..\..\bin\</BaseOutputPath>
+    <BaseIntermediateOutputPath>..\build\XboxCsMgr.Client\</BaseIntermediateOutputPath>
+    <BaseOutputPath>..\bin\</BaseOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
