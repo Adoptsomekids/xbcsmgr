@@ -48,8 +48,8 @@ namespace XboxCsMgr.Client
                 catch (Exception ex) { Debug.WriteLine("Wincred XSTS failed: " + ex.Message); }
             }
 
-            // No valid wincred tokens — open the WebView2 login dialog via IoC
-            var wm = IoC.Get<IWindowManager>();
+            // No valid wincred tokens — open the WebView2 login dialog
+            var wm = this.Container.Get<IWindowManager>();
             var loginVm = new LoginViewModel();
             this.RootViewModel.LoginView = loginVm;
             bool? loginResult = wm.ShowDialog(loginVm);
